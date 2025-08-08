@@ -7,14 +7,16 @@ module Github
   module Pulse
     class Analyzer
       using DateHelpers
-      attr_reader :repo_path, :github_repo, :token, :since, :until_date
+      attr_reader :repo_path, :github_repo, :token, :since, :until_date, :small_threshold, :medium_threshold
 
-      def initialize(repo_path:, github_repo: nil, token: nil, since: nil, until: nil)
+      def initialize(repo_path:, github_repo: nil, token: nil, since: nil, until: nil, small_threshold: 50, medium_threshold: 250)
         @repo_path = File.expand_path(repo_path)
         @github_repo = github_repo
         @token = token
         @since = since
         @until_date = binding.local_variable_get(:until)
+        @small_threshold = small_threshold
+        @medium_threshold = medium_threshold
       end
 
       def analyze
@@ -188,6 +190,8 @@ module Github
             number: pr[:number],
             title: pr[:title],
             created_at: pr[:created_at].iso8601,
+            merged_at: pr[:merged_at]&.iso8601,
+            closed_at: pr[:closed_at]&.iso8601,
             state: pr[:state],
             merged: !pr[:merged_at].nil?,
             additions: pr[:additions],
@@ -304,7 +308,130 @@ module Github
           end
         end
 
+        # PR cycle time over time (p50/p90/max days by week)
+        if report[:pull_requests].any?
+          by_week = Hash.new { |h, k| h[k] = [] }
+          report[:pull_requests].each do |_author, data|
+            data[:pull_requests].each do |pr|
+              next unless pr[:merged]
+              begin
+                created = Date.parse(pr[:created_at])
+                # merged_at not stored in nested pr, but we track merged flag only; fall back to closed date when merged
+                # We didn't include timestamps other than created_at; skip if unavailable
+              rescue
+                next
+              end
+            end
+          end
+          # We can compute cycle time only if detailed merged_at is available in PRs
+          # The GitHub clients provide merged_at at top-level before formatting.
+          # To preserve it, check if we stored it in pull_requests data; if not, skip this section.
+          # Detect presence
+          has_merged_at = report[:pull_requests].values.any? do |d|
+            d[:pull_requests].any? { |pr| pr.key?(:merged_at) }
+          end rescue false
+
+          if has_merged_at
+            by_week = Hash.new { |h, k| h[k] = [] }
+            report[:pull_requests].each do |_author, data|
+              data[:pull_requests].each do |pr|
+                next unless pr[:merged]
+                begin
+                  created = Time.parse(pr[:created_at])
+                  merged_at = Time.parse(pr[:merged_at])
+                  days = ((merged_at - created) / 86400.0)
+                  week = Date.parse(pr[:created_at]).beginning_of_week.iso8601
+                  by_week[week] << days
+                rescue
+                  next
+                end
+              end
+            end
+
+            viz_data[:pr_cycle_time_timeline] = by_week.sort.map do |week, values|
+              sorted = values.sort
+              p50 = percentile(sorted, 0.5)
+              p90 = percentile(sorted, 0.9)
+              { week: week, p50: p50.round(2), p90: p90.round(2), max: sorted.last.round(2), count: values.size }
+            end
+          end
+        end
+
+        # PR size mix over time (small/medium/large by week)
+        if report[:pull_requests].any?
+          buckets_by_week = Hash.new { |h, k| h[k] = { small: 0, medium: 0, large: 0 } }
+          report[:pull_requests].each do |_author, data|
+            data[:pull_requests].each do |pr|
+              begin
+                additions = pr[:additions] || 0
+                deletions = pr[:deletions] || 0
+                size = additions + deletions
+                week = Date.parse(pr[:created_at]).beginning_of_week.iso8601
+                if size <= small_threshold
+                  buckets_by_week[week][:small] += 1
+                elsif size <= medium_threshold
+                  buckets_by_week[week][:medium] += 1
+                else
+                  buckets_by_week[week][:large] += 1
+                end
+              rescue
+                next
+              end
+            end
+          end
+          viz_data[:pr_size_mix_timeline] = buckets_by_week.sort.map { |week, counts| { week: week, **counts } }
+        end
+
+        # Commit activity heatmap (weekday x hour)
+        if report[:commits].any?
+          heatmap = Array.new(7) { Array.new(24, 0) }
+          report[:commits].each do |_author, data|
+            data[:commits].each do |commit|
+              begin
+                t = Time.parse(commit[:time])
+                wday = t.wday # 0..6 (Sun..Sat)
+                hour = t.hour
+                heatmap[wday][hour] += 1
+              rescue
+                next
+              end
+            end
+          end
+          viz_data[:commit_activity_heatmap] = heatmap
+        end
+
+        # Open PRs aging buckets
+        if report[:pull_requests].any?
+          buckets = { "0-3d" => 0, "4-7d" => 0, "8-14d" => 0, "15+d" => 0 }
+          report[:pull_requests].each do |_author, data|
+            data[:pull_requests].each do |pr|
+              next unless pr[:state] == "open"
+              begin
+                age_days = ((Time.now - Time.parse(pr[:created_at])) / 86400.0)
+                key = case age_days
+                      when 0..3 then "0-3d"
+                      when 3...7 then "4-7d"
+                      when 7...15 then "8-14d"
+                      else "15+d"
+                      end
+                buckets[key] += 1
+              rescue
+                next
+              end
+            end
+          end
+          viz_data[:open_prs_aging] = buckets
+        end
+
         viz_data
+      end
+
+      def percentile(sorted_values, p)
+        return 0 if sorted_values.empty?
+        rank = (p * (sorted_values.length - 1))
+        lower = sorted_values[rank.floor]
+        upper = sorted_values[rank.ceil]
+        lower + (upper - lower) * (rank - rank.floor)
       end
     end
   end

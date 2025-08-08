@@ -7,6 +7,10 @@ GitHub Pulse is a Ruby gem that analyzes GitHub repository activity to provide i
 - **Pull Request Analysis**: Track PRs by teammate over time
 - **Lines of Code Analysis**: See current code ownership by contributor
 - **Commit Activity**: Monitor commit patterns and frequency
+- **PR Cycle Time**: Weekly p50/p90/max merge times
+- **PR Size Mix**: Small/medium/large PR composition over time
+- **Open PR Aging**: Buckets of aging open PRs
+- **Commit Heatmap**: Activity by weekday and hour
 - **Local Git Support**: Analyze repositories directly from local git data
 - **GitHub API Integration**: Enhanced data when GitHub token is provided
 - **Visualization-Ready Output**: JSON formatted for easy chart generation
@@ -90,6 +94,12 @@ github-pulse analyze --format=pretty
 
 # Custom output file (default: github-pulse-report.json)
 github-pulse analyze --output=my-report.json
+
+# Interactive HTML report
+github-pulse analyze --format=html
+
+# Tune PR size buckets (total additions+deletions)
+github-pulse analyze --format=html --small_threshold 50 --medium_threshold 250
 ```
 
 ## Output Format
@@ -133,7 +143,12 @@ The gem generates a comprehensive JSON report with the following structure:
     "pull_requests_timeline": [ /* ready for stacked bar chart */ ],
     "lines_of_code_chart": [ /* ready for bar chart */ ],
     "commit_activity_chart": [ /* ready for line chart */ ],
-    "commits_timeline": [ /* ready for stacked area chart */ ]
+    "commits_timeline": [ /* ready for stacked area chart */ ],
+    "lines_changed_timeline": [ /* weekly additions/deletions by author */ ],
+    "pr_cycle_time_timeline": [ /* weekly p50/p90/max days */ ],
+    "pr_size_mix_timeline": [ /* weekly small/medium/large PR counts */ ],
+    "open_prs_aging": { /* aging buckets for open PRs */ },
+    "commit_activity_heatmap": [[ /* 7x24 grid of commit counts */ ]]
   }
 }
 ```
@@ -146,6 +161,11 @@ The `visualization_data` section contains pre-formatted data ready for charting 
 - **lines_of_code_chart**: Bar chart data showing current code ownership
 - **commit_activity_chart**: Line chart data for overall repository activity
 - **commits_timeline**: Stacked area chart data for commits by author over time
+- **lines_changed_timeline**: Weekly additions/deletions by author (GitHub stats)
+- **pr_cycle_time_timeline**: Weekly median/percentile merge times (days)
+- **pr_size_mix_timeline**: Weekly mix of small/medium/large PRs
+- **open_prs_aging**: Counts of open PRs bucketed by age
+- **commit_activity_heatmap**: 7 rows (Sun–Sat) x 24 columns (hours)
 
 ## Requirements
 
@@ -158,6 +178,8 @@ The `visualization_data` section contains pre-formatted data ready for charting 
 After checking out the repo, run `bin/setup` to install dependencies. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
 
 To install this gem onto your local machine, run `bundle exec rake install`.
+
+Note: Some PR metrics (size, timestamps) are richer when authenticated via GitHub CLI (`gh auth login`) or with `GITHUB_TOKEN`. Octokit list endpoints may omit additions/deletions; the HTML report will gracefully degrade when fields are unavailable.
 
 ## Contributing
 

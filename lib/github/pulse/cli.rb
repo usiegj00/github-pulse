@@ -13,6 +13,8 @@ module Github
       option :format, type: :string, default: "json", enum: ["json", "pretty", "html"], desc: "Output format"
       option :since, type: :string, desc: "Analyze activity since this date (YYYY-MM-DD)"
       option :until, type: :string, desc: "Analyze activity until this date (YYYY-MM-DD)"
+      option :small_threshold, type: :numeric, default: 50, desc: "PR size threshold for 'small' (additions+deletions)"
+      option :medium_threshold, type: :numeric, default: 250, desc: "PR size threshold for 'medium' (additions+deletions)"
       
       def analyze(repo_path = ".")
         token = options[:token] || ENV["GITHUB_TOKEN"]
@@ -22,7 +24,9 @@ module Github
           github_repo: options[:repo],
           token: token,
           since: options[:since],
-          until: options[:until]
+          until: options[:until],
+          small_threshold: options[:small_threshold],
+          medium_threshold: options[:medium_threshold]
         )
         
         puts "Analyzing repository activity..."

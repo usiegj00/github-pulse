@@ -179,7 +179,11 @@ module Github
                       #{generate_pull_requests_chart}
                       #{generate_prs_timeline_chart}
                       #{generate_pr_status_chart}
+                      #{generate_pr_cycle_time_chart}
+                      #{generate_pr_size_mix_chart}
+                      #{generate_open_prs_aging_chart}
                   </div>
+                  #{generate_commit_heatmap}
                   
                   #{generate_contributors_table}
               </div>
@@ -296,6 +300,67 @@ module Github
           <div class="chart-container">
               <h3 class="chart-title">Pull Requests by Status</h3>
               <canvas id="prStatusChart"></canvas>
+          </div>
+        HTML
+      end
+
+      def generate_pr_cycle_time_chart
+        return %(<div class="chart-container"><div class="no-data">No PR cycle time data available</div></div>) if report[:visualization_data].nil? || report[:visualization_data][:pr_cycle_time_timeline].nil?
+        <<~HTML
+          <div class="chart-container">
+              <h3 class="chart-title">PR Cycle Time (days)</h3>
+              <canvas id="prCycleTimeChart"></canvas>
+          </div>
+        HTML
+      end
+
+      def generate_pr_size_mix_chart
+        return %(<div class="chart-container"><div class="no-data">No PR size data available</div></div>) if report[:visualization_data].nil? || report[:visualization_data][:pr_size_mix_timeline].nil?
+        <<~HTML
+          <div class="chart-container">
+              <h3 class="chart-title">PR Size Mix Over Time</h3>
+              <canvas id="prSizeMixChart"></canvas>
+          </div>
+        HTML
+      end
+
+      def generate_open_prs_aging_chart
+        return %(<div class="chart-container"><div class="no-data">No open PRs</div></div>) if report[:visualization_data].nil? || report[:visualization_data][:open_prs_aging].nil?
+        <<~HTML
+          <div class="chart-container">
+              <h3 class="chart-title">Open PRs Aging</h3>
+              <canvas id="openPrsAgingChart"></canvas>
+          </div>
+        HTML
+      end
+
+      def generate_commit_heatmap
+        return %(<div class="chart-container"><div class="no-data">No commit heatmap data available</div></div>) if report[:visualization_data].nil? || report[:visualization_data][:commit_activity_heatmap].nil?
+        heatmap = report[:visualization_data][:commit_activity_heatmap]
+        days = %w[Sun Mon Tue Wed Thu Fri Sat]
+        # Build a simple grid table with intensity via inline background
+        rows = heatmap.each_with_index.map do |hours, wday|
+          cells = hours.each_with_index.map do |count, hour|
+            intensity = [count, 10].min # cap for color scale
+            color = "rgba(102,126,234,#{0.1 + intensity * 0.09})"
+            %(<td title="#{days[wday]} #{hour}:00 — #{count}" style="background: #{color}; text-align:center; font-size: 12px;">#{count}</td>)
+          end.join
+          %(<tr><th style="position:sticky;left:0;background:#fff;">#{days[wday]}</th>#{cells}</tr>)
+        end.join
+        hours_header = (0..23).map { |h| %(<th>#{h}</th>) }.join
+        <<~HTML
+          <div class="chart-container">
+              <h3 class="chart-title">Commit Activity Heatmap</h3>
+              <div style="overflow:auto">
+              <table>
+                  <thead>
+                      <tr><th></th>#{hours_header}</tr>
+                  </thead>
+                  <tbody>
+                      #{rows}
+                  </tbody>
+              </table>
+              </div>
           </div>
         HTML
       end
@@ -528,7 +593,69 @@ module Github
             });
           JS
         end
-        
+
+        # PR Cycle Time Chart
+        if viz_data[:pr_cycle_time_timeline]
+          data = viz_data[:pr_cycle_time_timeline]
+          labels = data.map { |d| "'#{d[:week]}'" }.join(', ')
+          p50 = data.map { |d| d[:p50] }.join(', ')
+          p90 = data.map { |d| d[:p90] }.join(', ')
+          maxv = data.map { |d| d[:max] }.join(', ')
+          scripts << <<~JS
+            new Chart(document.getElementById('prCycleTimeChart'), {
+              type: 'line',
+              data: {
+                labels: [#{labels}],
+                datasets: [
+                  { label: 'p50', data: [#{p50}], borderColor: '#48bb78', fill: false },
+                  { label: 'p90', data: [#{p90}], borderColor: '#ed8936', fill: false },
+                  { label: 'max', data: [#{maxv}], borderColor: '#f56565', fill: false }
+                ]
+              },
+              options: { responsive: true, maintainAspectRatio: false }
+            });
+          JS
+        end
+
+        # PR Size Mix Chart
+        if viz_data[:pr_size_mix_timeline]
+          data = viz_data[:pr_size_mix_timeline]
+          labels = data.map { |d| "'#{d[:week]}'" }.join(', ')
+          small = data.map { |d| d[:small] }.join(', ')
+          medium = data.map { |d| d[:medium] }.join(', ')
+          large = data.map { |d| d[:large] }.join(', ')
+          scripts << <<~JS
+            new Chart(document.getElementById('prSizeMixChart'), {
+              type: 'bar',
+              data: {
+                labels: [#{labels}],
+                datasets: [
+                  { label: 'Small', data: [#{small}], backgroundColor: '#63b3ed' },
+                  { label: 'Medium', data: [#{medium}], backgroundColor: '#667eea' },
+                  { label: 'Large', data: [#{large}], backgroundColor: '#764ba2' }
+                ]
+              },
+              options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }
+            });
+          JS
+        end
+
+        # Open PRs Aging Chart
+        if viz_data[:open_prs_aging]
+          labels = viz_data[:open_prs_aging].keys.map { |k| "'#{k}'" }.join(', ')
+          values = viz_data[:open_prs_aging].values.join(', ')
+          scripts << <<~JS
+            new Chart(document.getElementById('openPrsAgingChart'), {
+              type: 'doughnut',
+              data: {
+                labels: [#{labels}],
+                datasets: [{ data: [#{values}], backgroundColor: ['#68d391', '#63b3ed', '#ed8936', '#f56565'] }]
+              },
+              options: { responsive: true, maintainAspectRatio: false }
+            });
+          JS
+        end
+
         scripts.join("\n")
       end
 
