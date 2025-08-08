@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    github-pulse (0.1.0)
+    github-pulse (0.2.0)
       json (~> 2.7)
       octokit (~> 9.0)
       rugged (~> 1.7)
